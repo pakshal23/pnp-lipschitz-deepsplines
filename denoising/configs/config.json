@@ -1,0 +1,63 @@
+{
+    "exp_name": "exp_name",
+    "seed": 42,
+    "sigma": 5,
+
+
+    "train_dataloader": {
+        "train_data_file": "data/train.h5",
+        "batch_size": 128,
+        "shuffle": true,
+        "num_workers": 4
+    },
+
+
+    "val_dataloader": {
+        "val_data_file": "data/val.h5",
+        "batch_size": 1,
+        "shuffle": false,
+        "num_workers": 0
+    },
+
+
+    "logging_info": {
+        "log_dir": "saved/",
+        "save_epoch": 25,
+        "log_iter": 100,
+        "epochs_per_val": 1
+    },
+
+
+    "net_params":{
+        "num_layers": 4,
+        "num_channels": 64,
+        "kernel_size": 3,
+        "padding": 1,
+        "bias": true,
+        "spectral_norm": true
+    },
+
+
+    "activation_fn_params":{
+        "activation_type": "deepBspline",
+        "spline_init" : "leaky_relu",
+        "spline_size": 21,
+        "spline_range": 3.0,
+        "save_memory": false,
+        "knot_threshold" : 0,
+        "num_classes" : 1
+    },
+
+
+    "training_options":{
+        "epochs": 100,
+        "lipschitz_1_proj": true,
+        "lmbda" : 1e-4
+    },
+
+
+    "optimizer": {
+        "type": "Adam",
+        "lr": 1e-5 
+    }  
+}

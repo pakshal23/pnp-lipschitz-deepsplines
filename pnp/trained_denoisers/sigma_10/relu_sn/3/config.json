@@ -1,0 +1,52 @@
+{
+    "activation_fn_params": {
+        "activation_type": "relu",
+        "knot_threshold": 0,
+        "num_classes": 1,
+        "save_memory": false,
+        "spline_init": "leaky_relu",
+        "spline_range": 5.0,
+        "spline_size": 51
+    },
+    "exp_name": "ReLU-H-L_sig_10_chan_032_lay_03",
+    "logging_info": {
+        "epochs_per_val": 1,
+        "log_dir": "final_exps/",
+        "log_imgs": true,
+        "log_iter": 100,
+        "log_params": true,
+        "save_epoch": 50
+    },
+    "net_params": {
+        "bias": true,
+        "kernel_size": 3,
+        "num_channels": 32,
+        "num_layers": 3,
+        "padding": 1,
+        "spectral_norm": true
+    },
+    "optimizer": {
+        "lr": 1e-05,
+        "type": "Adam"
+    },
+    "seed": 42,
+    "sigma": 10,
+    "train_dataloader": {
+        "batch_size": 128,
+        "num_workers": 4,
+        "shuffle": true,
+        "train_data_file": "/home/goujon/lipschitz-pnp/data/train.h5"
+    },
+    "training_options": {
+        "epochs": 200,
+        "lipschitz_1_proj": false,
+        "lmbda": 1e-05,
+        "mode": "half-averaged"
+    },
+    "val_dataloader": {
+        "batch_size": 1,
+        "num_workers": 0,
+        "shuffle": false,
+        "val_data_file": "/home/goujon/lipschitz-pnp/data/val.h5"
+    }
+}
