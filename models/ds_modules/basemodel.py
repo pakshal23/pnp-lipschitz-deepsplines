@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch import Tensor
-from ds_modules.deepBspline import DeepBSpline
+from models.ds_modules.deepBspline import DeepBSpline
 
 
 class BaseModel(nn.Module):

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from abc import ABC, abstractproperty, abstractmethod
-from ds_utils import spline_grid_from_range
+from models.ds_modules.ds_utils import spline_grid_from_range
 
 
 ###########################################################################
@@ -125,7 +125,8 @@ class DeepBSpline(ABC, nn.Module):
                  size=51,
                  range_=4,
                  grid=None,
-                 init='leaky_relu', 
+                 init='leaky_relu',
+                 save_memory = False, 
                  **kwargs):
 
         ######
@@ -163,7 +164,7 @@ class DeepBSpline(ABC, nn.Module):
         self.save_memory = bool(save_memory)
         self.init_zero_knot_indexes()
 
-        self.D2_filter = Tensor([1, -2, 1]).view(1, 1, 3).div(self.grid)
+        self.D2_filter = torch.Tensor([1, -2, 1]).view(1, 1, 3).div(self.grid)
 
         #####
         # tensor with locations of spline coefficients

@@ -1,5 +1,5 @@
 import torch.nn as nn
-from ds_modules import BaseModel
+from models.ds_modules.basemodel import BaseModel
 from models.conv_sn_chen import conv_spectral_norm
 import torch
 
@@ -9,7 +9,7 @@ def make_conv_layer(in_channels, out_channels, kernel_size, padding, bias, spect
     """
     conv_layer = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, padding=padding, bias=bias)
     if (spectral_norm):
-        return conv_spectral_norm(conv_layer, sigma=1.0)
+        return conv_spectral_norm(conv_layer, sigma=1.0, n_power_iterations=1)
     else:
         return conv_layer
 
@@ -51,17 +51,3 @@ class SimpleCNN(BaseModel):
         """ """
         out = self.net(x)
         return out
-
-    def init_D(self,device):
-        """
-        Setting up the finite-difference matrix D
-        """
-
-        self.D = torch.zeros([self.size-1, self.size], device)
-        size = self.grid.item()
-        for i in range(self.size-1):
-            self.D[i, i] = -1.0/size
-            self.D[i, i+1] = 1.0/size
-
-        # Transpose of D
-        self.DT = torch.transpose(self.D, 0, 1)
