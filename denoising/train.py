@@ -12,11 +12,7 @@ def main(config, device):
     if not os.path.exists(exp_dir):
         os.makedirs(exp_dir)
     
-    seed = config['seed']
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-
-    trainer_inst = trainer.Trainer(config, seed, device)
+    trainer_inst = trainer.Trainer(config, device)
     trainer_inst.train()
 
 
