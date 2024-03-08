@@ -10,98 +10,7 @@ sys.path.append('..')
 from models import simple_cnn
 import imageio
 from PIL import Image
-import pylops_gpu
-import math
 
-
-######################## Functions for TV ##########################
-class LinOpGrad():
-    
-    def __init__(self, sizein, device):
-        
-        self.H = sizein[0]
-        self.W = sizein[1]
-        self.device = device
-        
-        self.Dop_0 = pylops_gpu.FirstDerivative(self.H*self.W, dims=(self.H, self.W), dir=0, device=device, togpu=(True, True))
-        self.Dop_1 = pylops_gpu.FirstDerivative(self.H*self.W, dims=(self.H, self.W), dir=1, device=device, togpu=(True, True))
-    
-    def apply(self, x):
-        x = x.to(torch.float)
-        with torch.no_grad():
-            x = x.to(self.device)
-            out_0 = self.Dop_0*(x.reshape(-1))
-            out_1 = self.Dop_1*(x.reshape(-1))
-            out = torch.cat([torch.reshape(out_0, (1, self.H, self.W)), torch.reshape(out_1, (1, self.H, self.W))], dim=0)
-            #out = out.to(vol.device)
-            
-        return out
-        
-    def applyJacobianT(self, y):
-        
-        with torch.no_grad():
-            y = y.to(self.device)
-            out = torch.reshape(self.Dop_0.H*(y[0,...].view(-1)), (self.H, self.W)) + torch.reshape(self.Dop_1.H*(y[1,...].view(-1)), (self.H, self.W))
-            #out = out.to(y.device)
-            out = out.unsqueeze(0)
-            out = out.unsqueeze(0)
-            
-        return out # 1 x 1 x K x K
-
-
-def enforce_box_constraints(x, xmin, xmax):
-    out = torch.clamp(x, min=xmin, max=xmax)    
-    return out
-
-
-class CostTV():
-    def __init__(self, sizein, lamb, device):
-        
-        self.sizein = sizein
-        self.lamb = lamb
-        self.device = device
-        #self.bounds = [-float('Inf'), float('Inf')]
-        self.bounds = [0.0, float('Inf')]
-        
-        # Gradient operator
-        self.D = LinOpGrad(self.sizein, self.device)
-        
-        # Parameters for FGP for the prox
-        self.gam = 1.0/8
-        self.num_iter = 100
-        
-    def apply(self, x):
-        """x"""
-        with torch.no_grad():
-            out = torch.sum(torch.sqrt(torch.sum(torch.pow(self.D.apply(x), 2), dim=0)))
-        return self.lamb*out
-    
-    def apply_all(self, x):
-        """x"""
-        return self.apply(x)
-        
-    def applyProx(self, u, alpha):
-        
-        with torch.no_grad():
-            alpha = alpha*self.lamb
-            # Initializations
-            P = torch.zeros(2, self.sizein[0], self.sizein[1], device=u.device)
-            F = torch.zeros(2, self.sizein[0], self.sizein[1], device=u.device)
-            t = 1.0
-            for kk in range(self.num_iter):
-                #Pnew = F + (self.gam/(alpha))*self.D.apply(u - alpha*self.D.applyJacobianT(F))
-                Pnew = F + (self.gam/(alpha))*self.D.apply(enforce_box_constraints(u - alpha*self.D.applyJacobianT(F), self.bounds[0], self.bounds[1]))
-                tmp = torch.clamp(torch.sqrt(torch.sum(torch.pow(Pnew, 2), dim=0)), min=1.0)
-                Pnew = Pnew/tmp.expand(2, self.sizein[0], self.sizein[1])
-                
-                tnew = (1 + math.sqrt(1 + 4*(t**2)))/2
-                F = Pnew + (t - 1)/tnew*(Pnew - P)
-                t = tnew
-                P = Pnew
-        
-        return enforce_box_constraints(u - alpha*self.D.applyJacobianT(P), self.bounds[0], self.bounds[1])
-
-##############################################################################
 
 def pnp_fbs_csmri_(model, im_orig, mask, noise_sigma, device, **opts):
 
@@ -109,8 +18,6 @@ def pnp_fbs_csmri_(model, im_orig, mask, noise_sigma, device, **opts):
     alpha = opts.get('alpha', 1e-5)
     sigma = opts.get('sigma', 5)
     verbose = opts.get('verbose',1)
-    mode = opts.get('mode', 'nn')
-    tv_lamb = opts.get('tv_lamb', 0.0)
     device = device
     inc = []
     if verbose:
@@ -119,7 +26,7 @@ def pnp_fbs_csmri_(model, im_orig, mask, noise_sigma, device, **opts):
     """ Initialization. """
 
     m, n = im_orig.shape
-    noise = np.random.normal(loc=0, scale=noise_sigma / 2.0, size=(m, n, 2)).view(np.complex128)
+    noise = np.random.normal(loc=0, scale=noise_sigma/2.0, size=(m, n, 2)).view(np.complex128)
     noise = np.squeeze(noise)
 
     y_clean = np.fft.fft2(im_orig, norm='backward') * mask
@@ -127,19 +34,16 @@ def pnp_fbs_csmri_(model, im_orig, mask, noise_sigma, device, **opts):
     meas_snr = 10*np.log10(np.sum(np.square(np.absolute(y_clean)))/np.sum(np.square(np.absolute(y-y_clean))))
     print('Measurement SNR: ', meas_snr)
 
-    x_init = np.real(np.fft.ifft2(y)) # zero fill
+    #x_init = np.real(np.fft.ifft2(y)) # zero fill
+    x_init = np.fft.ifft2(y)
 
     # Power iterations to compute step-size
     #L = power_iteration(mask, m, n, 100)
     #alpha = 1/L
     print('alpha: ', alpha)
 
-    if (mode == 'tv'):
-        print('tv reg param: ', tv_lamb)
-        cost_tv = CostTV(im_orig.shape, tv_lamb, device)
-
-    zero_fill_snr = psnr(x_init, im_orig)
-    print('zero-fill PSNR:', zero_fill_snr)
+    zero_fill_snr = compute_snr(x_init, im_orig)
+    print('zero-fill SNR:', zero_fill_snr)
     if verbose:
         snr.append(zero_fill_snr)
 
@@ -154,57 +58,41 @@ def pnp_fbs_csmri_(model, im_orig, mask, noise_sigma, device, **opts):
         Hx = np.fft.fft2(x, norm='backward')*mask
         grad = np.fft.ifft2((Hx-y)*mask, norm='forward')
         x = x - alpha*grad
-        x = np.real(x)
+        #x = np.real(x)
+        x = np.absolute(x)
 
         """ Denoising step. """
-        if (mode == 'nn'):
+        xtilde = np.copy(x)
+        mintmp = np.min(xtilde)
+        maxtmp = np.max(xtilde)
+        xtilde = (xtilde - mintmp) / (maxtmp - mintmp)
 
-            xtilde = np.copy(x)
-            mintmp = np.min(xtilde)
-            maxtmp = np.max(xtilde)
-            xtilde = (xtilde - mintmp) / (maxtmp - mintmp)
+        # the reason for the following scaling:
+        # our denoisers are trained with "normalized images + noise"
+        # so the scale should be 1 + O(sigma)
 
-            # the reason for the following scaling:
-            # our denoisers are trained with "normalized images + noise"
-            # so the scale should be 1 + O(sigma)
+        scale_range = 1.0 + sigma / 255 / 2.0
+        scale_shift = (1 - scale_range) / 2.0
+        xtilde = xtilde * scale_range + scale_shift
 
-            scale_range = 1.0 + sigma / 255 / 2.0
-            scale_shift = (1 - scale_range) / 2.0
-            xtilde = xtilde * scale_range + scale_shift
+        xtilde_torch = np.reshape(xtilde, (1, 1, m, n))
+        xtilde_torch = torch.from_numpy(xtilde_torch).type(torch.FloatTensor).to(device, non_blocking=True)
+        x = ((xtilde_torch + model(xtilde_torch))/2.0).cpu().numpy()
+        x = np.reshape(x, (m, n))
 
-            xtilde_torch = np.reshape(xtilde, (1, 1, m, n))
-            xtilde_torch = torch.from_numpy(xtilde_torch).type(torch.FloatTensor).to(device, non_blocking=True)
-            x = ((xtilde_torch + model(xtilde_torch))/2.0).cpu().numpy()
-            x = np.reshape(x, (m, n))
+        # scale and shift the denoised image back
+        x = (x - scale_shift) / scale_range
+        x = x * (maxtmp - mintmp) + mintmp
 
-            # scale and shift the denoised image back
-            x = (x - scale_shift) / scale_range
-            x = x * (maxtmp - mintmp) + mintmp
-
-        elif (mode == 'tv'):
-            
-            xtilde_torch = np.reshape(np.copy(x), (1, 1, m, n))
-            xtilde_torch = torch.from_numpy(xtilde_torch).type(torch.FloatTensor).to(device, non_blocking=True)
-            x = cost_tv.applyProx(xtilde_torch, alpha)
-            x = x.cpu().numpy()
-            x = np.reshape(x, (m, n))
-
-        elif (mode == 'id'):
-
-            x = 1.0*x
-
-        else:
-            print('wrong mode')
-
-        
         """ Monitoring. """
         if verbose:
-            snr_tmp = psnr(x, im_orig)
-            print("i: {}, \t psnr: {}".format(i + 1, snr_tmp))
+            snr_tmp = compute_snr(x, im_orig)
+            print("i: {}, \t snr: {}".format(i + 1, snr_tmp))
             snr.append(snr_tmp)
 
         inc.append(np.sqrt(np.sum((np.absolute(x - xold)) ** 2)))
 
+    x_init = np.real(x_init)
     if verbose:
         return x, inc, x_init, zero_fill_snr, snr
     else:
@@ -213,17 +101,15 @@ def pnp_fbs_csmri_(model, im_orig, mask, noise_sigma, device, **opts):
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='PnP Reconstruction')
-    parser.add_argument('--exp_name', default=None, type=str, help='name of the experiment')
-    parser.add_argument('--img_file', default='CS_MRI', type=str, help='Path to the image file')
-    parser.add_argument('--mask_file', default='CS_MRI', type=str, help='Path to the mask file')
-    parser.add_argument("--noise_sigma", type=float, default=0, help="Noise level for the denoising model")
-    parser.add_argument('--model_dir', default='final_exps', type=str, help='Path to the model directory')
+    parser.add_argument('--exp_name', default='./results/trial_exp', type=str, help='name of the experiment')
+    parser.add_argument('--img_file', default='./mri_data/Brain.jpg', type=str, help='Path to the image file')
+    parser.add_argument('--mask_file', default='./mri_data/Q_Random30.mat', type=str, help='Path to the mask file')
+    parser.add_argument("--noise_sigma", type=float, default=10, help="Noise level for the denoising model")
+    parser.add_argument('--model_dir', default='./trained_denoisers/sigma_5/ds_sn/5', type=str, help='Path to the model directory')
     parser.add_argument('--device', default="cpu", type=str, help='device location')
-    parser.add_argument('--mode', default="nn", type=str, help='Mode of operation')
     parser.add_argument("--sigma", type=float, default=5, help="Noise level for the denoising model")
     parser.add_argument("--alpha", type=float, default=1e-5, help="Step size for FBS")
-    parser.add_argument("--maxitr", type=int, default=100, help="Number of iterations")
-    parser.add_argument("--tv_lamb", type=float, default=0.0, help="Reg param for TV")
+    parser.add_argument("--maxitr", type=int, default=300, help="Number of iterations")
     parser.add_argument("--verbose", type=int, default=1, help="Whether printing the info out")
     args = parser.parse_args()
     return args
@@ -264,12 +150,12 @@ def scale(img):
     return image
 
 
-def psnr(x, im_orig):
+def compute_snr(x, im_orig):
     xout = (x - np.min(x)) / (np.max(x) - np.min(x))
     norm1 = np.sum((np.absolute(im_orig)) ** 2)
     norm2 = np.sum((np.absolute(x - im_orig)) ** 2)
-    psnr = 10 * np.log10(norm1 / norm2)
-    return psnr
+    snr_val = 10 * np.log10(norm1 / norm2)
+    return snr_val
 
 
 if __name__ == '__main__':
@@ -315,7 +201,7 @@ if __name__ == '__main__':
         mask = mat.get('Q1').astype(np.float64)
 
         # ---- set options -----
-        opts = dict(sigma=args.sigma, maxitr=args.maxitr, alpha=args.alpha, verbose=args.verbose, mode=args.mode, tv_lamb=args.tv_lamb)
+        opts = dict(sigma=args.sigma, maxitr=args.maxitr, alpha=args.alpha, verbose=args.verbose)
 
         # ---- plug and play !!! -----
         if args.verbose:
@@ -324,9 +210,9 @@ if __name__ == '__main__':
             x_out, inc, x_init, zero_fill_snr = pnp_fbs_csmri_(model, im_orig, mask, args.noise_sigma, device, **opts)
 
         # ---- print result -----
-        out_snr = psnr(x_out, im_orig)
-        print('Plug-and-Play PNSR: ', out_snr)
-        metrics = {"PSNR": np.round(snr, 8), "Zero fill PSNR": np.round(zero_fill_snr, 8), }
+        out_snr = compute_snr(x_out, im_orig)
+        print('Plug-and-Play SNR: ', out_snr)
+        metrics = {"SNR": np.round(snr, 8), "Zero fill SNR": np.round(zero_fill_snr, 8), }
 
         with open(f'{path}/snr.txt', 'w') as f:
             for k, v in list(metrics.items()):
@@ -345,8 +231,8 @@ if __name__ == '__main__':
             fig, ax1 = plt.subplots()
             ax1.plot(snr, 'b-', linewidth=1)
             ax1.set_xlabel('iteration')
-            ax1.set_ylabel('PSNR', color='b')
-            ax1.set_title("PSNR curve")
+            ax1.set_ylabel('SNR', color='b')
+            ax1.set_title("SNR curve")
             fig.savefig(f'{path}/snr.png')
             plt.show()
 
